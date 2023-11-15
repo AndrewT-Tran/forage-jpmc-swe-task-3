@@ -1,0 +1,208 @@
+From 5ec4968ec7047758e84e555f1900d1b60016d92c Mon Sep 17 00:00:00 2001
+From: Andrew T Tran <me@andrewtran-shi.dev>
+Date: Wed, 15 Nov 2023 01:46:00 -0800
+Subject: [PATCH] 	new file:   Pipfile 	new file:   datafeed/Pipfile 
+ new file:   datafeed/Pipfile.lock 	modified:   src/DataManipulator.ts 
+ modified:   src/Graph.tsx
+
+---
+ Pipfile                | 11 +++++++++++
+ datafeed/Pipfile       | 12 ++++++++++++
+ datafeed/Pipfile.lock  | 38 ++++++++++++++++++++++++++++++++++++++
+ src/DataManipulator.ts | 34 +++++++++++++++++++++++-----------
+ src/Graph.tsx          | 27 +++++++++++++++++----------
+ 5 files changed, 101 insertions(+), 21 deletions(-)
+ create mode 100644 Pipfile
+ create mode 100644 datafeed/Pipfile
+ create mode 100644 datafeed/Pipfile.lock
+
+diff --git a/Pipfile b/Pipfile
+new file mode 100644
+index 0000000..645a67e
+--- /dev/null
++++ b/Pipfile
+@@ -0,0 +1,11 @@
++[[source]]
++url = "https://pypi.org/simple"
++verify_ssl = true
++name = "pypi"
++
++[packages]
++
++[dev-packages]
++
++[requires]
++python_version = "3.12"
+diff --git a/datafeed/Pipfile b/datafeed/Pipfile
+new file mode 100644
+index 0000000..3a6d5f6
+--- /dev/null
++++ b/datafeed/Pipfile
+@@ -0,0 +1,12 @@
++[[source]]
++url = "https://pypi.org/simple"
++verify_ssl = true
++name = "pypi"
++
++[packages]
++python-dateutil = "==2.8.2"
++
++[dev-packages]
++
++[requires]
++python_version = "3.12"
+diff --git a/datafeed/Pipfile.lock b/datafeed/Pipfile.lock
+new file mode 100644
+index 0000000..32e0ef7
+--- /dev/null
++++ b/datafeed/Pipfile.lock
+@@ -0,0 +1,38 @@
++{
++    "_meta": {
++        "hash": {
++            "sha256": "4fc52ff740ec9e962951a0fa69615d4a3a564168f3557e9c902474a285dbdf1d"
++        },
++        "pipfile-spec": 6,
++        "requires": {
++            "python_version": "3.12"
++        },
++        "sources": [
++            {
++                "name": "pypi",
++                "url": "https://pypi.org/simple",
++                "verify_ssl": true
++            }
++        ]
++    },
++    "default": {
++        "python-dateutil": {
++            "hashes": [
++                "sha256:0123cacc1627ae19ddf3c27a5de5bd67ee4586fbdd6440d9748f8abb483d3e86",
++                "sha256:961d03dc3453ebbc59dbdea9e4e11c5651520a876d0f4db161e8674aae935da9"
++            ],
++            "index": "pypi",
++            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2'",
++            "version": "==2.8.2"
++        },
++        "six": {
++            "hashes": [
++                "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926",
++                "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254"
++            ],
++            "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2'",
++            "version": "==1.16.0"
++        }
++    },
++    "develop": {}
++}
+diff --git a/src/DataManipulator.ts b/src/DataManipulator.ts
+index 7f62295..3e17069 100644
+--- a/src/DataManipulator.ts
++++ b/src/DataManipulator.ts
+@@ -1,20 +1,32 @@
+ import { ServerRespond } from './DataStreamer';
+ 
+ export interface Row {
+-  stock: string,
+-  top_ask_price: number,
+-  timestamp: Date,
++price_abc: number,
++price_def: number,
++ratio: number,
++timestamp: Date,
++upper_bound: number,
++lower_bound: number,
++trigger_alert: number | undefined,
+ }
+ 
+ 
+ export class DataManipulator {
+-  static generateRow(serverResponds: ServerRespond[]) {
+-    return serverResponds.map((el: any) => {
+-      return {
+-        stock: el.stock,
+-        top_ask_price: el.top_ask && el.top_ask.price || 0,
+-        timestamp: el.timestamp,
+-      };
+-    })
++  static generateRow(serverResponds: ServerRespond[]): Row {
++    const priceABC = (serverResponds[0].top_ask.price + serverResponds[0].top_bid.price) / 2;
++    const priceDEF = (serverResponds[1].top_ask.price + serverResponds[1].top_bid.price) / 2;
++    const ratio = priceABC / priceDEF;
++    const upperBound = 1 + 0.05;
++    const lowerBound = 1 - 0.05;
++    return {
++      price_abc: priceABC,
++      price_def: priceDEF,
++      ratio,
++      timestamp: serverResponds[0].timestamp > serverResponds[1].timestamp ?
++        serverResponds[0].timestamp : serverResponds[1].timestamp,
++      upper_bound: upperBound,
++      lower_bound: lowerBound,
++      trigger_alert: (ratio > upperBound || ratio < lowerBound) ? ratio : undefined,
++    };
+   }
+ }
+diff --git a/src/Graph.tsx b/src/Graph.tsx
+index 277797d..a52e90b 100644
+--- a/src/Graph.tsx
++++ b/src/Graph.tsx
+@@ -1,5 +1,5 @@
+ import React, { Component } from 'react';
+-import { Table } from '@finos/perspective';
++import { Table, TableData } from '@finos/perspective';
+ import { ServerRespond } from './DataStreamer';
+ import { DataManipulator } from './DataManipulator';
+ import './Graph.css';
+@@ -23,10 +23,13 @@ class Graph extends Component<IProps, {}> {
+     const elem = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;
+ 
+     const schema = {
+-      stock: 'string',
+-      top_ask_price: 'float',
+-      top_bid_price: 'float',
++      price_abc: 'float',
++      price_def: 'float',
++      ratio: 'float',
+       timestamp: 'date',
++      upper_bound: 'float',
++      lower_bound: 'float',
++      trigger_alert: 'float',
+     };
+ 
+     if (window.perspective && window.perspective.worker()) {
+@@ -38,21 +41,25 @@ class Graph extends Component<IProps, {}> {
+       elem.setAttribute('view', 'y_line');
+       elem.setAttribute('column-pivots', '["stock"]');
+       elem.setAttribute('row-pivots', '["timestamp"]');
+-      elem.setAttribute('columns', '["top_ask_price"]');
++      elem.setAttribute('columns', '["ratio", "lower_bound", "upper_bound", "trigger_alert"]');
+       elem.setAttribute('aggregates', JSON.stringify({
+-        stock: 'distinctcount',
+-        top_ask_price: 'avg',
+-        top_bid_price: 'avg',
++        price_abc: 'avg',
++        price_def: 'avg',
++        ratio: 'avg',
+         timestamp: 'distinct count',
++        upper_bound: 'avg',
++        lower_bound: 'avg',
++        trigger_alert: 'avg',
+       }));
+     }
+   }
+ 
+   componentDidUpdate() {
+     if (this.table) {
+-      this.table.update(
++      this.table.update([
++
+         DataManipulator.generateRow(this.props.data),
+-      );
++      ] as unknown as TableData);
+     }
+   }
+ }
+-- 
+2.42.0.windows.2
+
